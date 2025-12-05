@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { getServices, updateServiceStatus, deleteService } from '../database/SQLiteService';
 import { ServiceModel } from '../database/types';
+import { scheduleServiceReminder, cancelServiceReminder } from '../services/NotificationService'; // Importação NOVA
 
 export default function Schedule() {
   const [items, setItems] = useState<ServiceModel[]>([]);
@@ -13,11 +14,18 @@ export default function Schedule() {
   const loadData = async () => {
     try {
       const allServices = await getServices();
-      // Filtra apenas o que NÃO foi concluído (isCompleted == 0)
       const pending = allServices.filter(item => item.isCompleted === 0);
       setItems(pending);
+      
+      // NOVO: Agenda lembretes para os serviços pendentes
+      pending.forEach(item => {
+        if (item.id) {
+          scheduleServiceReminder(item.id, item.date, item.description);
+        }
+      });
+
     } catch (error) {
-      console.log(error);
+      console.log('Erro ao carregar agenda:', error);
     } finally {
       setLoading(false);
     }
@@ -29,7 +37,7 @@ export default function Schedule() {
     }, [])
   );
 
-  const handleFinish = async (id: number) => {
+  const handleFinish = async (item: ServiceModel) => {
     Alert.alert(
       "Concluir Serviço",
       "Deseja marcar este serviço como realizado? Ele irá para o seu faturamento.",
@@ -38,8 +46,11 @@ export default function Schedule() {
         { 
           text: "Sim, Concluir", 
           onPress: async () => {
-            await updateServiceStatus(id, 1); // Muda status para 1
-            loadData(); // Recarrega a lista
+            if (item.id) {
+              await updateServiceStatus(item.id, 1); // Muda status para 1
+              await cancelServiceReminder(item.id); // NOVO: Cancela o lembrete
+              loadData(); // Recarrega a lista
+            }
           }
         }
       ]
@@ -47,9 +58,13 @@ export default function Schedule() {
   };
 
   const handleDelete = async (id: number) => {
-    Alert.alert("Excluir", "Tem certeza?", [
+    Alert.alert("Excluir", "Tem certeza que deseja excluir o agendamento?", [
       { text: "Cancelar" },
-      { text: "Sim", onPress: async () => { await deleteService(id); loadData(); } }
+      { text: "Sim", onPress: async () => { 
+        await deleteService(id); 
+        await cancelServiceReminder(id); // NOVO: Cancela o lembrete
+        loadData(); 
+      } }
     ]);
   };
 
@@ -63,7 +78,7 @@ export default function Schedule() {
       </View>
       
       <View style={styles.actions}>
-        <TouchableOpacity style={styles.checkButton} onPress={() => handleFinish(item.id!)}>
+        <TouchableOpacity style={styles.checkButton} onPress={() => handleFinish(item)}>
           <Ionicons name="checkmark-circle" size={32} color="#27AE60" />
         </TouchableOpacity>
         
@@ -88,6 +103,7 @@ export default function Schedule() {
           <View style={styles.emptyContainer}>
             <Ionicons name="calendar-outline" size={50} color="#CCC" />
             <Text style={styles.emptyText}>Nenhum agendamento pendente.</Text>
+            <Text style={styles.emptyTextSmall}>Cadastre um serviço na aba "Novo Serviço" e use o botão "Agendar".</Text>
           </View>
         )}
       />
@@ -96,74 +112,18 @@ export default function Schedule() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-    paddingTop: 50,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    paddingHorizontal: 20,
-    marginBottom: 10,
-  },
-  card: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  cardContent: {
-    flex: 1,
-  },
-  date: {
-    color: '#F39C12',
-    fontWeight: 'bold',
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  description: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 2,
-  },
-  location: {
-    fontSize: 14,
-    color: '#777',
-    marginBottom: 4,
-  },
-  value: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#555',
-  },
-  actions: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 15,
-    marginLeft: 10,
-  },
-  checkButton: {
-    padding: 5,
-  },
-  deleteButton: {
-    padding: 5,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    marginTop: 100,
-  },
-  emptyText: {
-    color: '#999',
-    marginTop: 10,
-    fontSize: 16,
-  }
+  container: { flex: 1, backgroundColor: '#F8F9FA', paddingTop: 50, },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#333', paddingHorizontal: 20, marginBottom: 10, },
+  card: { backgroundColor: '#FFF', borderRadius: 12, padding: 15, marginBottom: 15, flexDirection: 'row', alignItems: 'center', shadowOpacity: 0.05, elevation: 2, },
+  cardContent: { flex: 1, },
+  date: { color: '#F39C12', fontWeight: 'bold', fontSize: 14, marginBottom: 4, },
+  description: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 2, },
+  location: { fontSize: 14, color: '#777', marginBottom: 4, },
+  value: { fontSize: 14, fontWeight: 'bold', color: '#555', },
+  actions: { flexDirection: 'column', alignItems: 'center', gap: 15, marginLeft: 10, },
+  checkButton: { padding: 5, },
+  deleteButton: { padding: 5, },
+  emptyContainer: { alignItems: 'center', marginTop: 100, },
+  emptyText: { color: '#999', marginTop: 10, fontSize: 16, },
+  emptyTextSmall: { color: '#999', fontSize: 12, marginTop: 5, textAlign: 'center' }
 });

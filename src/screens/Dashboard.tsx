@@ -1,88 +1,136 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, RefreshControl } from 'react-native';
+import React, { useState, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, RefreshControl, Dimensions, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { BarChart } from 'react-native-chart-kit'; // Importação NOVA
 
-// Importa nossas peças
-import { getServices } from '../database/SQLiteService';
+import { getServices, getMonthlyRevenue } from '../database/SQLiteService'; // getMonthlyRevenue NOVO
 import { ServiceModel } from '../database/types';
 import { ServiceCard } from '../components/ServiceCard';
+
+const screenWidth = Dimensions.get('window').width;
 
 export default function Dashboard() {
   const [services, setServices] = useState<ServiceModel[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [monthlyRevenue, setMonthlyRevenue] = useState<{ month: string, total: number }[]>([]); // Estado NOVO para o gráfico
 
-  // Função que busca os dados
   const loadData = async () => {
     try {
-      // Busca a lista do banco
+      setLoading(true);
+      
       const data = await getServices();
-      setServices(data);
+      const completedServices = data.filter(s => s.isCompleted === 1);
+      setServices(completedServices); // Mostra só os concluídos no histórico
 
-      // Calcula o total somando o valor de todos os itens
-      // (reduce é uma função JS para somar arrays)
-      const sum = data.reduce((acc, item) => acc + item.value, 0);
+      // 1. Cálculo do Total
+      const sum = completedServices.reduce((acc, item) => acc + item.value, 0);
       setTotal(sum);
       
+      // 2. Busca de Dados para o Gráfico
+      const monthlyData = await getMonthlyRevenue();
+      setMonthlyRevenue(monthlyData);
+      
     } catch (error) {
-      console.log(error);
+      console.log("Erro ao carregar dashboard:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  // O Pulo do Gato: Recarrega sempre que a tela aparece
   useFocusEffect(
     useCallback(() => {
       loadData();
     }, [])
   );
 
+  // Formata os dados para o Gráfico
+  const chartData = useMemo(() => {
+    const data = monthlyRevenue.sort((a, b) => (a.month > b.month ? 1 : -1));
+    const labels = data.map(item => item.month.split('-')[1]); // Pega só o MÊS
+    const revenues = data.map(item => item.total);
+
+    return {
+      labels: labels.length > 0 ? labels : ['0'],
+      datasets: [
+        {
+          data: revenues.length > 0 ? revenues : [0],
+        },
+      ],
+    };
+  }, [monthlyRevenue]);
+
   return (
-    <View style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={loading} onRefresh={loadData} />
+      }
+    >
       {/* Cabeçalho Azul com Resumo */}
       <View style={styles.headerContainer}>
-        <Text style={styles.welcomeText}>Visão Geral</Text>
+        <Text style={styles.welcomeText}>Visão Geral do Faturamento</Text>
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Total Recebido</Text>
+          <Text style={styles.summaryLabel}>Total Recebido (Todos os tempos)</Text>
           <Text style={styles.summaryValue}>
             {total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           </Text>
-          <Text style={styles.summaryCount}>{services.length} serviços realizados</Text>
+          <Text style={styles.summaryCount}>{services.length} serviços concluídos</Text>
         </View>
       </View>
 
+      {/* Gráfico de Ganhos Mensais */}
+      <View style={styles.chartArea}>
+        <Text style={styles.chartTitle}>Ganhos por Mês (Últimos 6 meses)</Text>
+        <BarChart
+            data={chartData}
+            width={screenWidth - 40} // Largura total da tela menos margens
+            height={220}
+            yAxisLabel="R$"
+            yAxisSuffix=""
+            chartConfig={{
+                backgroundColor: '#ffffff',
+                backgroundGradientFrom: '#ffffff',
+                backgroundGradientTo: '#ffffff',
+                decimalPlaces: 0, // Sem casas decimais no eixo Y
+                color: (opacity = 1) => `rgba(0, 122, 255, ${opacity})`, // Cor da barra
+                labelColor: (opacity = 1) => `rgba(51, 51, 51, ${opacity})`,
+                style: {
+                    borderRadius: 16,
+                },
+                propsForBackgroundLines: {
+                    strokeDasharray: '', // Linhas contínuas
+                }
+            }}
+            style={styles.chartStyle}
+        />
+      </View>
+
+
       {/* Lista de Serviços */}
       <View style={styles.listContainer}>
-        <Text style={styles.listTitle}>Histórico Recente</Text>
+        <Text style={styles.listTitle}>Últimos Faturamentos</Text>
         
         <FlatList
-          data={services}
+          data={services.slice(0, 5)} // Mostra apenas os 5 mais recentes
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => <ServiceCard data={item} />}
-          contentContainerStyle={{ paddingBottom: 20 }}
-          // Permite puxar pra baixo pra atualizar
-          refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={loadData} />
-          }
+          scrollEnabled={false} // Para não ter scroll dentro do scroll (FlatList dentro de ScrollView)
           ListEmptyComponent={() => (
-            <Text style={styles.emptyText}>Nenhum serviço registrado ainda.</Text>
+            <Text style={styles.emptyText}>Cadastre um serviço na aba "Novo Serviço".</Text>
           )}
         />
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F2F2F2',
-  },
+  container: { flex: 1, backgroundColor: '#F2F2F2' },
   headerContainer: {
     backgroundColor: '#007AFF',
     padding: 20,
-    paddingTop: 50, // Espaço para a barra de status
+    paddingTop: 50,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
     marginBottom: 20,
@@ -121,9 +169,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  // Gráfico
+  chartArea: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  chartTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  chartStyle: {
+    marginVertical: 8,
+    borderRadius: 16,
+    paddingRight: 20, // Ajuste para o eixo Y
+    backgroundColor: '#FFF',
+  },
+  // Lista
   listContainer: {
-    flex: 1,
     paddingHorizontal: 20,
+    paddingBottom: 40,
   },
   listTitle: {
     fontSize: 18,
@@ -134,7 +201,7 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     color: '#999',
-    marginTop: 50,
+    marginTop: 20,
     fontStyle: 'italic',
   }
 });

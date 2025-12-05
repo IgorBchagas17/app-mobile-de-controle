@@ -3,7 +3,8 @@ import { ServiceModel, ServiceTypeModel, FinanceModel } from './types';
 
 // Garante que estamos usando o mesmo banco novo
 const getDb = async () => {
-  return await SQLite.openDatabaseAsync('oficina_v2.db');
+  // MUDANÇA CRÍTICA: Novo nome do banco
+  return await SQLite.openDatabaseAsync('oficina_v3.db'); 
 };
 
 // --- Funções de SERVIÇOS (Trabalho) ---
@@ -126,4 +127,71 @@ export const getMonthlyRevenue = async (): Promise<MonthlyData[]> => {
     // O Expo SQLite não tem o total_entrada / total_saida de forma simples em uma query.
     // Vamos usar a mesma lógica do getFinanceBalance() mas agrupando por mês no Javascript
     return data;
+};
+// --- NOVA LÓGICA FINANCEIRA PROFISSIONAL ---
+
+// 1. Adicionar APENAS Saída (Gasto) na tabela finance
+export const addExpense = async (description: string, value: number, date: string, category: string) => {
+    const db = await getDb();
+    await db.runAsync(
+        'INSERT INTO finance (type, description, value, date) VALUES (?, ?, ?, ?)',
+        ['saida', description, value, date] // Forçamos 'saida'
+    );
+};
+
+// 2. Buscar Extrato Unificado (Serviços + Gastos)
+export interface Transaction {
+    id: string; // ID único combinado (ex: 's-1' ou 'f-5')
+    type: 'entrada' | 'saida';
+    description: string;
+    value: number;
+    date: string;
+    origin: 'service' | 'finance'; // Para sabermos de onde veio
+}
+
+export const getUnifiedTransactions = async () => {
+    const db = await getDb();
+    
+    // A. Busca Serviços CONCLUÍDOS (Entradas)
+    const services = await db.getAllAsync<any>('SELECT id, description, value, date FROM services WHERE isCompleted = 1');
+    
+    // B. Busca Gastos manuais (Saídas) da tabela finance
+    const expenses = await db.getAllAsync<any>("SELECT id, description, value, date FROM finance WHERE type = 'saida'");
+
+    // C. Unifica e Padroniza
+    const unified: Transaction[] = [
+        ...services.map(s => ({
+            id: `s-${s.id}`,
+            type: 'entrada' as const,
+            description: s.description,
+            value: s.value,
+            date: s.date,
+            origin: 'service' as const
+        })),
+        ...expenses.map(e => ({
+            id: `f-${e.id}`,
+            type: 'saida' as const,
+            description: e.description,
+            value: e.value,
+            date: e.date,
+            origin: 'finance' as const
+        }))
+    ];
+
+    // D. Ordena por Data (Mais recente primeiro)
+    return unified.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+};
+
+// 3. Excluir Transação (Se for serviço, avisa que deve excluir lá)
+export const deleteTransaction = async (id: string, origin: 'service' | 'finance') => {
+    const db = await getDb();
+    const realId = id.split('-')[1]; // Remove o prefixo
+
+    if (origin === 'service') {
+        // Opção: Deletar o serviço ou apenas voltar para pendente. 
+        // Vamos deletar por enquanto para simplificar o fluxo de caixa.
+        await db.runAsync('DELETE FROM services WHERE id = ?', [realId]);
+    } else {
+        await db.runAsync('DELETE FROM finance WHERE id = ?', [realId]);
+    }
 };

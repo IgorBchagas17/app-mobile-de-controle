@@ -2,11 +2,10 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 
-import Dashboard from '../screens/Dashboard';
-import Register from '../screens/Register';
-import Schedule from '../screens/Schedule';
-import FinanceScreen from '../screens/FinanceScreen';
-import InvoiceScreen from '../screens/InvoiceScreen'; // IMPORTAÇÃO NOVA
+import HomeScreen from '../screens/HomeScreen';         // Nova Home (Gráficos)
+import ServicesHistory from '../screens/ServicesHistory'; // Antigo Dashboard (Lista)
+import Schedule from '../screens/Schedule';             // Agenda
+import FinanceScreen from '../screens/FinanceScreen';   // Caixa
 
 const Tab = createBottomTabNavigator();
 
@@ -15,39 +14,25 @@ export default function AppRoutes() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false, 
-        tabBarActiveTintColor: '#007AFF', 
+        tabBarActiveTintColor: '#1D70B8', 
         tabBarInactiveTintColor: 'gray', 
-        tabBarStyle: {
-          paddingBottom: 5,
-          paddingTop: 5,
-          height: 60,
-        },
+        tabBarStyle: { paddingBottom: 5, paddingTop: 5, height: 60 },
         tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap;
+          let iconName: keyof typeof Ionicons.glyphMap = 'alert-circle';
 
-          if (route.name === 'Dashboard') {
-            iconName = focused ? 'stats-chart' : 'stats-chart-outline';
-          } else if (route.name === 'Novo Serviço') {
-            iconName = focused ? 'add-circle' : 'add-circle-outline';
-          } else if (route.name === 'Agenda') {
-            iconName = focused ? 'calendar' : 'calendar-outline';
-          } else if (route.name === 'Caixa') {
-            iconName = focused ? 'cash' : 'cash-outline';
-          } else if (route.name === 'Nota') { // NOVO ÍCONE
-            iconName = focused ? 'document-text' : 'document-text-outline';
-          } else {
-            iconName = 'alert-circle';
-          }
+          if (route.name === 'Início') iconName = focused ? 'stats-chart' : 'stats-chart-outline';
+          else if (route.name === 'Serviços') iconName = focused ? 'receipt' : 'receipt-outline';
+          else if (route.name === 'Agenda') iconName = focused ? 'calendar' : 'calendar-outline';
+          else if (route.name === 'Caixa') iconName = focused ? 'wallet' : 'wallet-outline';
 
           return <Ionicons name={iconName} size={size} color={color} />;
         },
       })}
     >
-      <Tab.Screen name="Dashboard" component={Dashboard} />
-      <Tab.Screen name="Novo Serviço" component={Register} />
+      <Tab.Screen name="Início" component={HomeScreen} />
+      <Tab.Screen name="Serviços" component={ServicesHistory} />
       <Tab.Screen name="Agenda" component={Schedule} />
       <Tab.Screen name="Caixa" component={FinanceScreen} />
-      <Tab.Screen name="Nota" component={InvoiceScreen} />
     </Tab.Navigator>
   );
 }

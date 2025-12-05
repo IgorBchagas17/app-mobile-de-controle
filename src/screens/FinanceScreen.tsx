@@ -1,179 +1,207 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl } from 'react-native';
+import React, { useState, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, Alert, RefreshControl } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
-import { CustomInput } from '../components/CustomInput';
-import { addFinanceEntry, getFinanceEntries, getFinanceBalance } from '../database/SQLiteService';
-import { FinanceModel } from '../database/types';
+import { getUnifiedTransactions, deleteTransaction, Transaction } from '../database/SQLiteService';
+import { ExpenseModal } from '../components/ExpenseModal';
+import { useDBContext } from '../database/DBContext';
+import { Colors, Spacing, Typography, Styles } from '../utils/theme';
+
+type FilterType = 'tudo' | 'entrada' | 'saida';
 
 export default function FinanceScreen() {
-  const [description, setDescription] = useState('');
-  const [value, setValue] = useState('');
-  const [entries, setEntries] = useState<FinanceModel[]>([]);
-  const [balance, setBalance] = useState({ totalEntrada: 0, totalSaida: 0, balance: 0 });
-  const [loading, setLoading] = useState(true);
+    const { isReady } = useDBContext();
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [filter, setFilter] = useState<FilterType>('tudo');
+    const [loading, setLoading] = useState(true);
+    const [isModalVisible, setIsModalVisible] = useState(false);
 
-  // --- Lógica de Dados ---
-  const loadData = async () => {
-    try {
-      const allEntries = await getFinanceEntries();
-      const balanceData = await getFinanceBalance();
+    const loadData = async () => {
+        if (!isReady) return;
+        setLoading(true);
+        try {
+            const data = await getUnifiedTransactions();
+            setTransactions(data);
+        } catch (error) {
+            console.log(error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
-      setEntries(allEntries.slice(0, 10)); // Mostrar só os 10 mais recentes
-      setBalance(balanceData);
-    } catch (error) {
-      console.log('Erro ao carregar finanças:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    useFocusEffect(useCallback(() => { if (isReady) loadData(); }, [isReady]));
 
-  useFocusEffect(useCallback(() => { loadData(); }, []));
+    // 1. Filtragem
+    const filteredData = useMemo(() => {
+        if (filter === 'tudo') return transactions;
+        return transactions.filter(t => t.type === filter);
+    }, [transactions, filter]);
 
-  const handleSave = async (type: 'entrada' | 'saida') => {
-    if (!description || !value) {
-      Alert.alert('Erro', 'Preencha descrição e valor.');
-      return;
-    }
-    
-    try {
-      const numericValue = parseFloat(value.replace(',', '.'));
-      if (isNaN(numericValue) || numericValue <= 0) {
-        Alert.alert('Erro', 'Valor inválido.');
-        return;
-      }
+    // 2. Cálculo do Saldo (Baseado no filtro ou geral)
+    const balance = useMemo(() => {
+        const entradas = transactions.filter(t => t.type === 'entrada').reduce((acc, t) => acc + t.value, 0);
+        const saidas = transactions.filter(t => t.type === 'saida').reduce((acc, t) => acc + t.value, 0);
+        return entradas - saidas;
+    }, [transactions]);
 
-      const newEntry: FinanceModel = {
-        type,
-        description,
-        value: numericValue,
-        date: new Date().toISOString().split('T')[0],
-      };
+    // 3. Agrupamento por Data (Para SectionList)
+    const sections = useMemo(() => {
+        const grouped: { [key: string]: Transaction[] } = {};
+        
+        filteredData.forEach(item => {
+            const dateParts = item.date.split('-'); // YYYY-MM-DD
+            const dateObj = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+            
+            // Formata data amigável
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const itemDateZero = new Date(dateObj);
+            itemDateZero.setHours(0,0,0,0);
 
-      await addFinanceEntry(newEntry);
-      
-      setDescription('');
-      setValue('');
-      loadData(); // Recarrega para atualizar o balanço
-      Alert.alert('Sucesso', `Transação de ${type} salva!`);
-      
-    } catch (error) {
-      Alert.alert('Erro', `Falha ao salvar: ${String(error)}`);
-    }
-  };
+            let headerTitle = dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+            if (itemDateZero.getTime() === today.getTime()) headerTitle = "Hoje";
+            
+            if (!grouped[headerTitle]) grouped[headerTitle] = [];
+            grouped[headerTitle].push(item);
+        });
 
-  // --- Componentes ---
-  const formatCurrency = (val: number) => 
-    val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        return Object.keys(grouped).map(key => ({
+            title: key,
+            data: grouped[key]
+        }));
+    }, [filteredData]);
 
-  const EntryCard = ({ entry }: { entry: FinanceModel }) => {
-    const isSaida = entry.type === 'saida';
-    const color = isSaida ? '#E74C3C' : '#27AE60';
-    const iconName = isSaida ? 'arrow-down-circle' : 'arrow-up-circle';
+    const handleDelete = (item: Transaction) => {
+        Alert.alert(
+            "Excluir Registro",
+            item.origin === 'service' 
+                ? "Este registro vem de um Serviço Concluído. Ao excluir aqui, você apagará o serviço original."
+                : "Tem certeza que deseja apagar esta despesa?",
+            [
+                { text: "Cancelar" },
+                { text: "Apagar", style: 'destructive', onPress: async () => {
+                    await deleteTransaction(item.id, item.origin);
+                    loadData();
+                }}
+            ]
+        );
+    };
+
+    const SegmentControl = () => (
+        <View style={styles.segmentContainer}>
+            {(['tudo', 'entrada', 'saida'] as FilterType[]).map((f) => (
+                <TouchableOpacity 
+                    key={f} 
+                    style={[styles.segmentBtn, filter === f && styles.segmentBtnActive]}
+                    onPress={() => setFilter(f)}
+                >
+                    <Text style={[styles.segmentText, filter === f && styles.segmentTextActive]}>
+                        {f === 'tudo' ? 'Todos' : f === 'entrada' ? 'Entradas' : 'Saídas'}
+                    </Text>
+                </TouchableOpacity>
+            ))}
+        </View>
+    );
 
     return (
-      <View style={styles.entryCard}>
-        <Ionicons name={iconName} size={24} color={color} style={{ marginRight: 10 }} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.entryDescription}>{entry.description}</Text>
-          <Text style={styles.entryDate}>{entry.date.split('T')[0]}</Text>
+        <View style={styles.container}>
+            {/* Header Saldo */}
+            <View style={styles.header}>
+                <Text style={styles.headerLabel}>Saldo em Caixa</Text>
+                <Text style={[styles.headerValue, { color: balance >= 0 ? Colors.success : Colors.danger }]}>
+                    {balance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </Text>
+            </View>
+
+            <SegmentControl />
+
+            <SectionList
+                sections={sections}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={{ paddingHorizontal: Spacing.md, paddingBottom: 100 }}
+                stickySectionHeadersEnabled={false}
+                refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
+                renderSectionHeader={({ section: { title } }) => (
+                    <Text style={styles.sectionHeader}>{title}</Text>
+                )}
+                renderItem={({ item }) => (
+                    <TouchableOpacity onLongPress={() => handleDelete(item)} activeOpacity={0.7}>
+                        <View style={styles.transactionRow}>
+                            <View style={[styles.iconBox, { backgroundColor: item.type === 'entrada' ? '#E8F5E9' : '#FFEBEE' }]}>
+                                <Ionicons 
+                                    name={item.type === 'entrada' ? "arrow-up" : "arrow-down"} 
+                                    size={20} 
+                                    color={item.type === 'entrada' ? Colors.success : Colors.danger} 
+                                />
+                            </View>
+                            <View style={{ flex: 1, paddingHorizontal: 10 }}>
+                                <Text style={styles.transDesc}>{item.description}</Text>
+                                <Text style={styles.transOrigin}>{item.origin === 'service' ? 'Serviço' : 'Despesa Manual'}</Text>
+                            </View>
+                            <Text style={[styles.transValue, { color: item.type === 'entrada' ? Colors.success : Colors.text }]}>
+                                {item.type === 'saida' ? '- ' : '+ '}
+                                {item.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                )}
+                ListEmptyComponent={<Text style={styles.empty}>Nenhum registro encontrado.</Text>}
+            />
+
+            {/* FAB APENAS PARA SAÍDA (Pois entradas vêm dos serviços) */}
+            <TouchableOpacity style={styles.fab} onPress={() => setIsModalVisible(true)}>
+                <Ionicons name="remove" size={32} color="#FFF" />
+            </TouchableOpacity>
+
+            <ExpenseModal 
+                isVisible={isModalVisible} 
+                onClose={() => setIsModalVisible(false)} 
+                onSuccess={loadData} 
+            />
         </View>
-        <Text style={[styles.entryValue, { color }]}>{formatCurrency(entry.value)}</Text>
-      </View>
     );
-  };
-
-  return (
-    <View style={styles.container}>
-      <ScrollView refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />} >
-        
-        <Text style={styles.title}>Caixa e Balanço Geral</Text>
-
-        {/* Cartão de Balanço */}
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>BALANÇO GERAL</Text>
-          <Text style={[styles.balanceValue, { color: balance.balance >= 0 ? '#27AE60' : '#E74C3C' }]}>
-            {formatCurrency(balance.balance)}
-          </Text>
-          <View style={styles.balanceDetail}>
-            <Text style={styles.detailText}>Entradas: {formatCurrency(balance.totalEntrada)}</Text>
-            <Text style={styles.detailText}>Saídas: {formatCurrency(balance.totalSaida)}</Text>
-          </View>
-        </View>
-
-        {/* Formulário de Nova Transação */}
-        <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Registrar Nova Transação (Caixa)</Text>
-          
-          <CustomInput 
-            label="Descrição (Ex: Combustível, Compra de Peças)"
-            placeholder="Motivo da entrada/saída"
-            value={description}
-            onChangeText={setDescription}
-          />
-          <CustomInput 
-            label="Valor (R$)"
-            placeholder="0.00"
-            keyboardType="numeric"
-            value={value}
-            onChangeText={setValue}
-          />
-
-          <View style={styles.buttonRow}>
-            <TouchableOpacity 
-              style={[styles.button, styles.saidaButton]} 
-              onPress={() => handleSave('saida')}
-            >
-              <Text style={styles.buttonText}>Registrar Saída</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.button, styles.entradaButton]} 
-              onPress={() => handleSave('entrada')}
-            >
-              <Text style={styles.buttonText}>Registrar Entrada</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-        
-        {/* Histórico de Transações */}
-        <View style={styles.historyContainer}>
-          <Text style={styles.historyTitle}>Últimas Transações</Text>
-          {entries.map(entry => <EntryCard key={entry.id} entry={entry} />)}
-          {entries.length === 0 && <Text style={{ color: '#999', textAlign: 'center' }}>Nenhuma transação registrada.</Text>}
-        </View>
-
-      </ScrollView>
-    </View>
-  );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F2F2F2' },
-    title: { fontSize: 28, fontWeight: 'bold', color: '#007AFF', padding: 20, paddingTop: 60, },
+    container: { flex: 1, backgroundColor: Colors.background, paddingTop: 50 },
     
-    // Balance Card
-    balanceCard: { backgroundColor: '#FFF', marginHorizontal: 20, padding: 20, borderRadius: 10, shadowOpacity: 0.1, shadowRadius: 5, elevation: 3, marginBottom: 20, },
-    balanceLabel: { fontSize: 14, color: '#666', marginBottom: 5, },
-    balanceValue: { fontSize: 36, fontWeight: 'bold', },
-    balanceDetail: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, borderTopWidth: 1, borderTopColor: '#EEE', paddingTop: 10, },
-    detailText: { fontSize: 14, color: '#666' },
+    // Header Clean iOS
+    header: { alignItems: 'center', marginBottom: Spacing.lg },
+    headerLabel: { fontSize: 14, color: Colors.lightText, textTransform: 'uppercase', letterSpacing: 1 },
+    headerValue: { fontSize: 36, fontWeight: '800', marginTop: 5 },
 
-    // Form
-    formContainer: { backgroundColor: '#FFF', marginHorizontal: 20, padding: 20, borderRadius: 10, shadowOpacity: 0.05, elevation: 1, marginBottom: 20, },
-    formTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#333' },
-    buttonRow: { flexDirection: 'row', gap: 10, marginTop: 10, },
-    button: { flex: 1, height: 50, borderRadius: 8, justifyContent: 'center', alignItems: 'center', },
-    saidaButton: { backgroundColor: '#E74C3C', },
-    entradaButton: { backgroundColor: '#27AE60', },
-    buttonText: { color: '#FFF', fontWeight: 'bold' },
+    // Segment Control (Abas iOS)
+    segmentContainer: {
+        flexDirection: 'row', backgroundColor: '#E0E0E0', borderRadius: 12, padding: 3,
+        marginHorizontal: Spacing.lg, marginBottom: Spacing.lg
+    },
+    segmentBtn: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 10 },
+    segmentBtnActive: { backgroundColor: '#FFF', shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
+    segmentText: { fontSize: 13, fontWeight: '600', color: Colors.lightText },
+    segmentTextActive: { color: Colors.text },
 
-    // History
-    historyContainer: { marginHorizontal: 20, marginBottom: 40 },
-    historyTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: '#333' },
-    entryCard: { backgroundColor: '#FFF', padding: 10, borderRadius: 8, marginBottom: 8, flexDirection: 'row', alignItems: 'center', },
-    entryDescription: { fontWeight: '600' },
-    entryDate: { fontSize: 12, color: '#999' },
-    entryValue: { fontWeight: 'bold', fontSize: 16 }
+    // List
+    sectionHeader: { 
+        fontSize: 18, fontWeight: 'bold', color: Colors.text, 
+        marginTop: Spacing.md, marginBottom: Spacing.sm, marginLeft: Spacing.xs 
+    },
+    transactionRow: {
+        flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.cardBackground,
+        padding: 16, borderRadius: 16, marginBottom: 8,
+        // Sombra suave
+        shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1
+    },
+    iconBox: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+    transDesc: { fontSize: 15, fontWeight: '600', color: Colors.text },
+    transOrigin: { fontSize: 12, color: Colors.lightText, marginTop: 2 },
+    transValue: { fontSize: 15, fontWeight: '700' },
+    empty: { textAlign: 'center', marginTop: 50, color: Colors.lightText },
+
+    // FAB Vermelho (Foco em registrar gastos)
+    fab: {
+        position: 'absolute', right: 20, bottom: 30, width: 60, height: 60, borderRadius: 30,
+        backgroundColor: Colors.danger, justifyContent: 'center', alignItems: 'center',
+        shadowColor: Colors.danger, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6
+    }
 });

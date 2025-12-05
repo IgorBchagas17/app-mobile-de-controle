@@ -1,18 +1,16 @@
 // src/utils/theme.ts
 
-// 🎨 Paleta de Cores da Aplicação
 export const Colors = {
-    primary: '#1D70B8',          // Azul Profundo (Novo Azul Principal)
-    secondary: '#F39C12',        // Laranja/Amarelo (Para Alertas e Agenda)
-    success: '#27AE60',          // Verde (Para Ganhos e Concluído)
-    danger: '#E74C3C',           // Vermelho (Para Saídas e Exclusão)
-    background: '#F8F9FA',       // Cinza Claro (Fundo Principal)
-    cardBackground: '#FFFFFF',   // Branco Puro (Fundo de Cartões)
-    text: '#333333',             // Texto Principal Escuro
-    lightText: '#999999',        // Texto Secundário
+    primary: '#1D70B8',          
+    secondary: '#F39C12',        
+    success: '#27AE60',          
+    danger: '#E74C3C',           
+    background: '#F8F9FA',       
+    cardBackground: '#FFFFFF',   
+    text: '#333333',             
+    lightText: '#999999',        
 };
 
-// 📏 Configurações de Espaçamento
 export const Spacing = {
     xs: 4,
     sm: 8,
@@ -21,7 +19,6 @@ export const Spacing = {
     xl: 32,
 };
 
-// ✏️ Tipografia Básica
 export const Typography = {
     fontSize: {
         small: 12,
@@ -30,19 +27,19 @@ export const Typography = {
         extraLarge: 28,
     },
     fontFamily: {
-        regular: 'System',
+        regular: 'System', 
         bold: 'System',
     }
 };
 
-// 📐 Estilos Comuns (Sombra, Borda)
 export const Styles = {
+    // Sombra limpa e perfeita
     cardShadow: {
         shadowColor: Colors.text,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
-        elevation: 5, // Para Android
+        elevation: 5, 
         borderRadius: 10,
     },
     buttonBase: {

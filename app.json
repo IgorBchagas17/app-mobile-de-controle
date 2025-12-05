@@ -30,6 +30,12 @@
     "plugins": [
       "expo-sqlite",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6943ff17-e3e2-4ad7-94d9-659af5398a22"
+      }
+    },
+    "owner": "igorbchagas"
   }
 }

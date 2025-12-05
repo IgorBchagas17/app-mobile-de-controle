@@ -1,93 +1,65 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { ServiceModel } from '../database/types';
+import { Colors, Spacing, Typography, Styles } from '../utils/theme';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Props {
-  data: {
-    description: string;
-    value: number;
-    date: string;
-    location: string;
-  };
+  data: ServiceModel;
 }
 
-export function ServiceCard({ data }: Props) {
-  // Formatar dinheiro para R$
-  const formattedValue = data.value.toLocaleString('pt-BR', {
-    style: 'currency',
-    currency: 'BRL'
-  });
-
-  // Formatar data (converter 2023-10-25 para 25/10/2023)
-  const formattedDate = data.date.split('-').reverse().join('/');
-
+export const ServiceCard = ({ data }: Props) => {
+  const isPending = data.isCompleted === 0;
+  
   return (
-    <View style={styles.card}>
-      <View style={styles.header}>
+    <View style={[styles.card, Styles.cardShadow, { 
+      borderLeftColor: isPending ? Colors.secondary : Colors.success 
+    }]}>
+      <Ionicons 
+        name={isPending ? "alert-circle-outline" : "checkmark-circle-outline"} 
+        size={24} 
+        color={isPending ? Colors.secondary : Colors.success} 
+        style={styles.icon}
+      />
+      <View style={styles.content}>
         <Text style={styles.description}>{data.description}</Text>
-        <Text style={styles.value}>{formattedValue}</Text>
+        <Text style={styles.location}>{data.location}</Text>
       </View>
-      
-      <View style={styles.footer}>
-        <View style={styles.row}>
-          <Ionicons name="calendar-outline" size={14} color="#666" />
-          <Text style={styles.info}>{formattedDate}</Text>
-        </View>
-        
-        {data.location ? (
-          <View style={styles.row}>
-            <Ionicons name="location-outline" size={14} color="#666" />
-            <Text style={styles.info}>{data.location}</Text>
-          </View>
-        ) : null}
-      </View>
+      <Text style={styles.value}>
+        {data.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+      </Text>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFF',
-    padding: 15,
+    backgroundColor: Colors.cardBackground,
+    padding: Spacing.md,
     borderRadius: 10,
-    marginBottom: 10,
-    // Sombra suave
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  description: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    flex: 1, // Ocupa o espaço disponível para não empurrar o preço
-    marginRight: 10,
-  },
-  value: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#27AE60', // Verde dinheiro
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: '#EEE',
-    paddingTop: 10,
-  },
-  row: {
+    marginBottom: Spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
+    borderLeftWidth: 5,
   },
-  info: {
-    color: '#666',
-    fontSize: 12,
-    marginLeft: 4,
-  }
+  icon: {
+    marginRight: Spacing.sm,
+  },
+  content: {
+    flex: 1,
+  },
+  description: {
+    fontSize: Typography.fontSize.medium,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  location: {
+    fontSize: Typography.fontSize.small,
+    color: Colors.lightText,
+  },
+  value: {
+    fontSize: Typography.fontSize.medium,
+    fontWeight: 'bold',
+    color: Colors.text,
+  },
 });

@@ -1,19 +1,23 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Dimensions, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { BarChart } from 'react-native-chart-kit'; 
+import * as Haptics from 'expo-haptics'; // Toque tátil iOS
 
 import { getServices } from '../database/SQLiteService';
 import { ServiceModel } from '../database/types';
 import { useDBContext } from '../database/DBContext';
-import { Colors, Spacing, Typography, Styles } from '../utils/theme';
+import { useTheme } from '../context/ThemeContext'; // Novo Hook de Tema
+import { Spacing, Typography, Styles } from '../utils/theme';
 
 const screenWidth = Dimensions.get('window').width;
 
-type FilterType = 'mes' | '3meses' | '6meses' | 'ano' | 'tudo';
+type FilterType = 'mes' | '3meses' | 'ano';
 
 export default function HomeScreen() {
     const { isReady } = useDBContext();
+    const { theme, isDark } = useTheme(); // Usando o tema dinâmico
+    
     const [allServices, setAllServices] = useState<ServiceModel[]>([]);
     const [filteredServices, setFilteredServices] = useState<ServiceModel[]>([]);
     const [filter, setFilter] = useState<FilterType>('mes');
@@ -24,7 +28,6 @@ export default function HomeScreen() {
         setLoading(true);
         try {
             const data = await getServices();
-            // Apenas concluídos contam para o gráfico
             const completed = data.filter(s => s.isCompleted === 1);
             setAllServices(completed);
             applyFilter(filter, completed);
@@ -35,37 +38,21 @@ export default function HomeScreen() {
         }
     };
 
-    // Lógica de Calendário Precisa
     const applyFilter = (selectedFilter: FilterType, data: ServiceModel[]) => {
+        Haptics.selectionAsync(); // Vibraçãozinha ao trocar filtro
         setFilter(selectedFilter);
+        
         const now = new Date();
-        let startDate = new Date(); // Data de corte
+        let startDate = new Date();
 
-        if (selectedFilter === 'mes') {
-            // Dia 1 do mês atual
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        } else if (selectedFilter === '3meses') {
-            // Dia 1 de 3 meses atrás
-            startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-        } else if (selectedFilter === '6meses') {
-            startDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-        } else if (selectedFilter === 'ano') {
-            // Dia 1 de Janeiro deste ano
-            startDate = new Date(now.getFullYear(), 0, 1);
-        } else {
-            // Tudo (Data muito antiga)
-            startDate = new Date(1970, 0, 1);
-        }
+        if (selectedFilter === 'mes') startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        else if (selectedFilter === '3meses') startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+        else if (selectedFilter === 'ano') startDate = new Date(now.getFullYear(), 0, 1);
 
-        // Filtra comparando timestamps
         const filtered = data.filter(item => {
             const itemDate = new Date(item.date); 
-            // Precisamos garantir que a data do item (ex: 2023-10-05) seja considerada >= 2023-10-01
-            // Convertendo para 'setHours(0,0,0,0)' para evitar problemas de fuso horário na comparação simples
-            const itemTime = new Date(itemDate.getFullYear(), itemDate.getMonth(), itemDate.getDate()).getTime();
-            const startTime = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()).getTime();
-            
-            return itemTime >= startTime;
+            // Reset horas para comparação justa
+            return new Date(itemDate.toDateString()) >= new Date(startDate.toDateString());
         });
 
         setFilteredServices(filtered);
@@ -73,25 +60,24 @@ export default function HomeScreen() {
 
     useFocusEffect(useCallback(() => { if (isReady) loadData(); }, [isReady]));
 
-    // Totais Dinâmicos
+    // Totais
     const totalPeriodo = filteredServices.reduce((acc, curr) => acc + curr.value, 0);
-    const totalHoje = filteredServices.filter(s => s.date === new Date().toISOString().split('T')[0]).reduce((acc, s) => acc + s.value, 0);
 
-    // Gráfico Agrupado por Mês (Baseado nos dados filtrados)
+    // Dados do Gráfico
     const chartData = useMemo(() => {
         const groups: Record<string, number> = {};
+        const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+        
+        // Inicializa os últimos meses com 0 para o gráfico não ficar vazio
+        // (Lógica simplificada para visualização)
         
         filteredServices.forEach(item => {
-            // Chave: "Out/23"
             const dateObj = new Date(item.date);
-            // Array de meses curto
-            const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-            const key = `${monthNames[dateObj.getMonth()]}`;
-            
+            const key = monthNames[dateObj.getMonth()];
             groups[key] = (groups[key] || 0) + item.value;
         });
 
-        const labels = Object.keys(groups); // Pode precisar ordenar se a ordem vier errada
+        const labels = Object.keys(groups);
         const values = Object.values(groups);
 
         return {
@@ -100,98 +86,110 @@ export default function HomeScreen() {
         };
     }, [filteredServices]);
 
-    const FilterChip = ({ label, value }: { label: string, value: FilterType }) => (
-        <TouchableOpacity 
-            style={[styles.chip, filter === value && styles.chipSelected]} 
-            onPress={() => applyFilter(value, allServices)}
-        >
-            <Text style={[styles.chipText, filter === value && styles.chipTextSelected]}>{label}</Text>
-        </TouchableOpacity>
+    // Componente de Filtro (Segmented Control style)
+    const FilterSegment = () => (
+        <View style={[styles.segmentContainer, { backgroundColor: isDark ? '#1C1C1E' : '#E5E5EA' }]}>
+            {(['mes', '3meses', 'ano'] as FilterType[]).map((f) => {
+                const labels: Record<string, string> = { 'mes': 'Mês', '3meses': 'Trimestre', 'ano': 'Ano' };
+                const isActive = filter === f;
+                return (
+                    <TouchableOpacity 
+                        key={f} 
+                        style={[styles.segmentBtn, isActive && { backgroundColor: theme.cardBackground, ...Styles.cardShadow }]}
+                        onPress={() => applyFilter(f, allServices)}
+                    >
+                        <Text style={[
+                            styles.segmentText, 
+                            { color: isActive ? theme.text : theme.subtext, fontWeight: isActive ? '600' : '400' }
+                        ]}>
+                            {labels[f]}
+                        </Text>
+                    </TouchableOpacity>
+                )
+            })}
+        </View>
     );
 
     return (
-        <ScrollView style={styles.container} refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}>
+        <ScrollView 
+            style={[styles.container, { backgroundColor: theme.background }]} 
+            refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} tintColor={theme.primary} />}
+        >
             <View style={styles.header}>
-                <Text style={styles.title}>Visão Geral</Text>
-                <Text style={styles.subtitle}>Acompanhe o desempenho do negócio.</Text>
+                <Text style={[styles.title, { color: theme.text }]}>Visão Geral</Text>
             </View>
 
-            {/* Filtros */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersContainer}>
-                <FilterChip label="Este Mês" value="mes" />
-                <FilterChip label="3 Meses" value="3meses" />
-                <FilterChip label="6 Meses" value="6meses" />
-                <FilterChip label="Este Ano" value="ano" />
-                <FilterChip label="Tudo" value="tudo" />
-            </ScrollView>
+            <FilterSegment />
 
             {/* Card Principal */}
-            <View style={styles.mainCard}>
-                <Text style={styles.mainCardLabel}>Faturamento ({filter === 'mes' ? 'Mês Atual' : filter})</Text>
-                <Text style={styles.mainCardValue}>
+            <View style={[styles.mainCard, { backgroundColor: theme.cardBackground }]}>
+                <Text style={[styles.label, { color: theme.subtext }]}>FATURAMENTO</Text>
+                <Text style={[styles.value, { color: theme.success }]}>
                     {totalPeriodo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </Text>
-                <View style={styles.row}>
-                    <Text style={styles.miniLabel}>Hoje: {totalHoje.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</Text>
-                    <Text style={styles.miniLabel}>{filteredServices.length} serviços</Text>
-                </View>
             </View>
 
             {/* Gráfico */}
-            <View style={styles.chartContainer}>
-                <Text style={styles.chartTitle}>Evolução no Período</Text>
-                <BarChart
-                    data={chartData}
-                    width={screenWidth - 40}
-                    height={220}
-                    yAxisLabel="R$"
-                    yAxisSuffix=""
-                    chartConfig={{
-                        backgroundColor: Colors.cardBackground,
-                        backgroundGradientFrom: "#FFF",
-                        backgroundGradientTo: "#FFF",
-                        decimalPlaces: 0,
-                        color: (opacity = 1) => `rgba(29, 112, 184, ${opacity})`,
-                        labelColor: (opacity = 1) => `rgba(51, 51, 51, ${opacity})`,
-                        barPercentage: 0.7,
-                    }}
-                    style={{ borderRadius: 10 }}
-                    showValuesOnTopOfBars // Mostra o valor em cima da barra
-                />
+            <View style={[styles.chartContainer, { backgroundColor: theme.cardBackground }]}>
+                <Text style={[styles.chartTitle, { color: theme.text }]}>Desempenho</Text>
+                
+                {/* Scroll horizontal para o gráfico não quebrar layout */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <BarChart
+                        data={chartData}
+                        width={Math.max(screenWidth - 40, chartData.labels.length * 50)} // Largura dinâmica
+                        height={220}
+                        yAxisLabel="R$"
+                        yAxisSuffix=""
+                        chartConfig={{
+                            backgroundColor: theme.cardBackground,
+                            backgroundGradientFrom: theme.cardBackground,
+                            backgroundGradientTo: theme.cardBackground,
+                            decimalPlaces: 0,
+                            color: (opacity = 1) => theme.primary,
+                            labelColor: (opacity = 1) => theme.subtext,
+                            barPercentage: 0.7,
+                            propsForBackgroundLines: { strokeDasharray: "", stroke: theme.border }
+                        }}
+                        style={{ borderRadius: 12, paddingRight: 40 }}
+                        showValuesOnTopOfBars={true}
+                        fromZero={true}
+                    />
+                </ScrollView>
             </View>
+
+            <View style={{height: 100}} />
         </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: Colors.background, paddingTop: 50 },
+    container: { flex: 1, paddingTop: 60 },
     header: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.md },
-    title: { fontSize: Typography.fontSize.extraLarge, fontWeight: 'bold', color: Colors.text },
-    subtitle: { fontSize: Typography.fontSize.medium, color: Colors.lightText },
+    title: { fontSize: 34, fontWeight: 'bold' },
     
-    filtersContainer: { paddingHorizontal: Spacing.lg, marginBottom: Spacing.lg, height: 50 },
-    chip: {
-        paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
-        backgroundColor: Colors.cardBackground, borderRadius: 20, marginRight: Spacing.sm,
-        borderWidth: 1, borderColor: '#E0E0E0', height: 36, justifyContent: 'center'
+    segmentContainer: {
+        flexDirection: 'row',
+        marginHorizontal: Spacing.lg,
+        padding: 2,
+        borderRadius: 8,
+        marginBottom: Spacing.lg,
+        height: 36
     },
-    chipSelected: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-    chipText: { color: Colors.text, fontSize: 13, fontWeight: '600' },
-    chipTextSelected: { color: '#FFF' },
+    segmentBtn: { flex: 1, justifyContent: 'center', alignItems: 'center', borderRadius: 6 },
+    segmentText: { fontSize: 13 },
 
     mainCard: {
-        marginHorizontal: Spacing.lg, padding: Spacing.lg, backgroundColor: Colors.cardBackground,
-        borderRadius: 16, marginBottom: Spacing.lg,
-        shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3
+        marginHorizontal: Spacing.lg, padding: 20, borderRadius: 16, marginBottom: Spacing.lg,
+        // Sombra leve iOS
+        shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 12, elevation: 4
     },
-    mainCardLabel: { fontSize: Typography.fontSize.small, color: Colors.lightText, textTransform: 'uppercase' },
-    mainCardValue: { fontSize: 32, fontWeight: 'bold', color: Colors.success, marginVertical: Spacing.xs },
-    row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: Spacing.sm },
-    miniLabel: { fontSize: Typography.fontSize.small, color: Colors.text, fontWeight: '500' },
+    label: { fontSize: 12, fontWeight: '600', letterSpacing: 0.8, marginBottom: 4 },
+    value: { fontSize: 36, fontWeight: '700' },
 
     chartContainer: {
-        marginHorizontal: Spacing.lg, padding: Spacing.md, backgroundColor: Colors.cardBackground,
-        borderRadius: 16, marginBottom: 50
+        marginHorizontal: Spacing.lg, padding: 16, borderRadius: 16,
+        shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2
     },
-    chartTitle: { fontSize: Typography.fontSize.medium, fontWeight: 'bold', color: Colors.text, marginBottom: Spacing.md }
+    chartTitle: { fontSize: 18, fontWeight: '600', marginBottom: 16 }
 });

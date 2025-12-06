@@ -3,8 +3,7 @@ import { ServiceModel, ServiceTypeModel, FinanceModel } from './types';
 
 // Garante que estamos usando o mesmo banco novo
 const getDb = async () => {
-  // MUDANÇA CRÍTICA: Novo nome do banco
-  return await SQLite.openDatabaseAsync('oficina_v3.db'); 
+  return await SQLite.openDatabaseAsync('oficina_v4.db'); // Tem que bater com o Init
 };
 
 // --- Funções de SERVIÇOS (Trabalho) ---
